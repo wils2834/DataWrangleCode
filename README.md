@@ -688,3 +688,176 @@ ggplot(lysimeter_2015_climate, aes(x = maxT, y = nitrate, color = as.factor(Nrat
 nitrate_model_2015_temp <- lm(nitrate ~ maxT * Nrate, data = lysimeter_2015_climate)
 # Display model summary
 summary(nitrate_model_2015_temp)
+yield <- read_excel(wrangle, sheet = "Yield")
+str(yield)
+# Convert columns to appropriate types
+yield$year <- as.factor(yield$year)
+yield$legume_inclusion <- as.factor(yield$legume_inclusion) # Convert to factor
+yield$grain_yield <- as.numeric(as.character(yield$grain_yield)) #convert to numeric
+yield$IWG_straw_yield <- as.numeric(as.character(yield$IWG_straw_yield)) #convert to numeric
+yield$legume_biomass <- as.numeric(as.character(yield$legume_biomass)) #convert to numeric
+#lets make plots with only yield data
+bwplot(grain_yield ~ legume_inclusion | year, data = yield)
+#lets make this better
+library(lattice)
+#lets make a box plot looking at legume inclusion and yield across two years
+levels(yield$legume_inclusion) <- c("Legume Exclusion", "Legume Inclusion")
+bwplot(
+  grain_yield ~ legume_inclusion | year,
+  data = yield,
+  par.settings = list(
+    box.rectangle = list(fill = c("lightblue", "lightcoral")),  # Fill colors for boxplots
+    box.umbrella = list(col = "black"),  # Whiskers in black
+    plot.symbol = list(col = "black")    # Median points in black
+  ),
+  xlab = "Legume Inclusion Status",
+  ylab = "Grain Yield",
+  main = "Grain Yield by Legume Inclusion and Year"
+)
+#t-test to see if grain yield differs significantly between legume inclusion
+t_test_2014 <- t.test(subset(yield, year == 2014)$grain_yield ~ subset(yield, year == 2014)$legume_inclusion)
+t_test_2015 <- t.test(subset(yield, year == 2015)$grain_yield ~ subset(yield, year == 2015)$legume_inclusion)
+#See T-tests
+t_test_2014
+t_test_2015
+#anova  to see if grain yield differs significantly between legume inclusion
+anova_result <- aov(grain_yield ~ legume_inclusion, data = yield)
+summary(anova_result)
+#grain yield vs nitrate scatter
+yield %>%
+  ggplot(aes(x = Nrate, y = grain_yield,color = location)) +
+  geom_point() +
+  labs(title = "Grain Yield vs. Nitrogen Rate",
+       x = "Nitrogen Rate (Nrate)", y = "Grain Yield")
+#same but different
+xyplot(grain_yield~Nrate, data=yield, auto.key = T, type=c("p","r"))
+#density plot of grain yields
+yield %>%
+  ggplot(aes(x = grain_yield, fill = legume_inclusion)) +
+  geom_density(alpha = 0.5) +
+  facet_wrap(~ year) +
+  labs(title = "Density Plot of Grain Yield by Legume Inclusion",
+       x = "Grain Yield", y = "Density") +
+  scale_fill_manual(values = c("Legume Exclusion" = "lightblue", "Legume Inclusion" = "red"))
+
+#regression model
+lm_model <- lm(grain_yield ~ legume_inclusion + Nrate + year, data = yield)
+summary(lm_model)
+
+#lets add climate data----
+climate_lambertonbothyear<-climate_lamberton %>%
+  filter(date>"2014-01-1"&date<"2015-12-31")
+climate_wasecabothyear<-climate_waseca %>%
+  filter(date>"2014-01-1"&date<"2015-12-31")
+climate_wasecabothyear$date<-as.Date(climate_wasecabothyear$date, format = "%m/%d/%Y")
+str(climate_lambertonbothyear)
+str(climate_wasecabothyear)
+str(yield)
+#lets join these by year and location
+#merging both weather data sets together 2015
+# Standardize column names to ensure they match exactly
+colnames(climate_wasecabothyear)[colnames(climate_wasecabothyear) == "MinT"] <- "minT"
+bothyearweatherlandw <- rbind(climate_lambertonbothyear, climate_wasecabothyear)
+str(bothyearweatherlandw)
+str(yield)
+yieldandweather <- yield %>%
+  left_join(bothyearweatherlandw, by = c("year", "location")) #merging the weather with the lysimeter data
+#Plot yields by treatment averaged over different spatial and temporal scales 
+str(yield)
+str(yieldandweather)
+# Plot the raw grain yield data without summarizing
+ggplot(yieldandweather, aes(x = year, y = grain_yield, color = legume_inclusion)) +
+  geom_point(aes(shape = legume_inclusion), size = 2, alpha = 0.6) +  # Points for each data point
+  geom_line(aes(group = interaction(location, legume_inclusion)), alpha = 0.3) + # Optional: Lines to connect points by location and treatment
+  facet_wrap(~location) +  # Separate plots for each location
+  labs(
+    title = "Grain Yield by Treatment for Each Site-Year Combination",
+    x = "Year",
+    y = "Grain Yield (kg/ha)",
+    color = "Legume Inclusion Treatment",
+    shape = "Legume Inclusion Treatment"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1), # Rotate x-axis labels for readability
+    legend.position = "top" # Position the legend at the top
+  )
+#Yearly Average Yield by Treatment for Each Location
+ggplot(yieldandweather, aes(x = year, y = grain_yield, color = legume_inclusion)) +
+  stat_summary(fun = "mean", geom = "point", size = 3, position = position_dodge(width = 0.5)) +  # Show mean values
+  stat_summary(fun = "mean", geom = "line", size = 1, position = position_dodge(width = 0.5)) +  # Line to connect mean values
+  facet_wrap(~location) +  # Separate plots for each location
+  labs(
+    title = "Yearly Average Grain Yield by Treatment for Each Location",
+    x = "Year",
+    y = "Average Grain Yield (kg/ha)",
+    color = "Legume Inclusion Treatment"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "top"
+  )
+
+
+# Perform linear regression to check if environmental factors influence grain yield
+lm_results <- lm(grain_yield ~ maxT + minT + precipitation, data = yieldandweather)
+summary(lm_results)
+#Plot proportion of biomass by tissue type----
+# Convert data to long format for biomass types
+biomass_long <- yield %>%
+  dplyr::select(plot, legume_biomass, grain_yield, IWG_straw_yield) %>%
+  pivot_longer(
+    cols = c(legume_biomass, grain_yield, IWG_straw_yield),
+    names_to = "tissue_type",
+    values_to = "biomass"
+  ) %>%
+  group_by(plot) %>%
+  mutate(proportion = biomass / sum(biomass, na.rm = TRUE)) %>%
+  ungroup()
+head(biomass_long)
+# Stacked bar plot
+ggplot(biomass_long, aes(x = factor(plot), y = proportion, fill = tissue_type)) +
+  geom_bar(stat = "identity", position = "fill") +
+  labs(
+    title = "Proportion of Biomass by Tissue Type for Each Plot",
+    x = "Plot",
+    y = "Proportion",
+    fill = "Tissue Type"
+  ) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+# Faceted plot
+ggplot(biomass_long, aes(x = factor(plot), y = proportion, fill = tissue_type)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~ tissue_type, scales = "free_y") +
+  labs(
+    title = "Proportion of Biomass by Tissue Type for Each Plot",
+    x = "Plot",
+    y = "Proportion",
+    fill = "Tissue Type"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+# ANOVA and Linear regression
+str(yieldandweather)
+# Does grain yield differ significantly based on legume inclusion, N rate, and location?----
+anova_model <- aov(grain_yield ~ legume_inclusion * Nrate * location, data = yieldandweather)
+summary(anova_model)
+# Violin Plot for ANOVA model
+ggplot(yieldandweather, aes(x = legume_inclusion, y = grain_yield, fill = legume_inclusion)) +
+  geom_violin(trim = FALSE, alpha = 0.7) +
+  facet_wrap(~location) +
+  labs(
+    title = "Grain Yield Distribution by Legume Inclusion and Location",
+    x = "Legume Inclusion",
+    y = "Grain Yield",
+    fill = "Legume Inclusion"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+# How do temperature (maxT, minT), precipitation, and legume inclusion influence grain yield?----
+lm_model <- lm(grain_yield ~ maxT + minT + precipitation + legume_inclusion + Nrate, data = yieldandweather)
+summary(lm_model)
