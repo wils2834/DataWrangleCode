@@ -861,3 +861,358 @@ ggplot(yieldandweather, aes(x = legume_inclusion, y = grain_yield, fill = legume
 # How do temperature (maxT, minT), precipitation, and legume inclusion influence grain yield?----
 lm_model <- lm(grain_yield ~ maxT + minT + precipitation + legume_inclusion + Nrate, data = yieldandweather)
 summary(lm_model)
+soils_2014 <- read_excel(wrangle, sheet = "Soils-2014")
+soils_2015 <- read_excel(wrangle, sheet = "Soils-2015")
+moisture <- read_excel(wrangle, sheet = "Moisture")
+#lets fix the dates and strange columns we don't need
+str(soils_2014)
+str(soils_2015)
+soils_2014$date<-as.Date(soils_2014$Sample_date, format = "%m/%d/%Y")
+soils_2015 <- soils_2015 %>%
+  mutate(
+    date_char = paste(Sample_date, "11-01"),  # Combine year with January 1
+    parsed_date = ymd(date_char),             # Parse as date
+    year = year(parsed_date)                  # Extract the year (optional, since you already have it)
+  )
+soils_2015 <- soils_2015 %>%
+  dplyr::select(-c(date_char, parsed_date, Sample_date))
+
+soils_2014$date <- soils_2014$`sampl_ date`
+soils_2014 <- soils_2014 %>%
+  dplyr::select(-c(11, `sampl_ date`))
+#lets add location columns to soils 2015
+# Add location based on plot number
+soils_2015 <- soils_2015 %>%
+  mutate(location = ifelse(substr(as.character(plot), 1, 1) == "1", "Was", 
+                           ifelse(substr(as.character(plot), 1, 1) == "2", "Lam", NA)))
+
+#lets make some graphs of just the soil data ----
+# Convert columns to appropriate types
+soils_2014$legume_inclusion <- as.factor(soils_2014$legume_inclusion) # Convert to factor
+# Create a faceted plot by depth
+plot_legume_moisture_depth <- ggplot(soils_2014, aes(x = legume_inclusion, y = Soil_moisture_gravimetric, color = legume_inclusion)) +
+  geom_jitter(width = 0.2, height = 0, alpha = 0.6) +  # Adds slight jitter for visibility
+  geom_boxplot(alpha = 0.4, outlier.color = NA) +
+  facet_wrap(~ depth) +  # Facet the plot by depth
+  labs(
+    title = "Effect of Legume Inclusion on Soil Moisture (by Depth) 2014",
+    x = "Legume Inclusion (0 = No, 1 = Yes)",
+    y = "Soil Moisture Gravimetric%"
+  ) +
+  scale_color_manual(values = c("red", "blue")) +
+  theme_minimal()
+# Display the plot
+print(plot_legume_moisture_depth)
+ggplot(soils_2015, aes(x = depth, y = nitrate, fill = depth)) +
+  geom_boxplot() +
+  labs(title = "Nitrate Levels by Soil Depth 2015", x = "Soil Depth", y = "Nitrate (mg/L)") +
+  theme_minimal()
+ggplot(soils_2015, aes(x = TOC, y = nitrate)) +
+  geom_point(size = 3, alpha = 0.6) +
+  labs(title = "Nitrate vs Total Organic Carbon 2015", x = "Total Organic Carbon (g/kg)", y = "Nitrate (mg/L)") +
+  theme_minimal()
+ggplot(soils_2014, aes(x = depth, y = nitrate, fill = depth)) +
+  geom_boxplot() +
+  labs(title = "Nitrate Levels by Soil Depth (2014)", x = "Soil Depth", y = "Nitrate (mg/L)") +
+  theme_minimal()
+ggplot(soils_2014, aes(x = legume_inclusion, y = nitrate, fill = legume_inclusion)) +
+  geom_boxplot() +
+  labs(title = "Nitrate Levels by Legume Inclusion (2014)", x = "Legume Inclusion", y = "Nitrate (mg/L)") +
+  theme_minimal()
+ggplot(soils_2014, aes(x = Nrate, y = nitrate)) +
+  geom_point(size = 3, alpha = 0.6) +
+  labs(title = "Nitrate Levels by Nrate (2014)", x = "Nrate (lbs/acre)", y = "Nitrate (mg/L)") +
+  theme_minimal()
+
+
+#soil moisture ----
+str(moisture)
+moisture$date<-as.Date(moisture$date, format = "%m/%d/%Y")
+
+#longtowide transformation attempt ----
+#2014
+soils_2014_wide <- soils_2014 %>%
+  pivot_wider(
+    names_from = depth,   # Use 'depth' column for new column names
+    values_from = c(nitrate, ammonia, `LOI OM`, Soil_moisture_gravimetric),  # Columns we want to pivot
+    values_fill = list(    # Fill missing values with 0 for each variable
+      nitrate = 0, 
+      ammonia = 0, 
+      `LOI OM` = 0, 
+      Soil_moisture_gravimetric = 0
+    )
+  )
+
+# View the resulting wide format
+head(soils_2014_wide)
+#soils2015
+soils_2015_wide <- soils_2015 %>%
+  pivot_wider(
+    names_from = depth,   # Use 'depth' column for new column names
+    values_from = c('LOI OM', ammonia, nitrate, TOC),  # Columns to pivot
+    values_fill = list(    # Fill missing values with 0 for each variable
+      `LOI OM` = 0, 
+      ammonia = 0, 
+      nitrate = 0, 
+      TOC = 0
+    )
+  )
+
+# View the resulting wide format
+head(soils_2015_wide)
+str(soils_2014_wide)
+str(soils_2015_wide)
+
+#adding precipitation to soil moisture----
+str(climate_lamberton)
+str(climate_waseca)
+#climate_waseca$date <- as.Date(climate_waseca$date, format = "%m/%d/%Y")
+#names(climate_waseca)[names(climate_waseca) == "MinT"] <- "minT"# Rename 'MinT' to 'minT' to match 'climate_lamberton'
+# Merge the datasets
+weatherboth<-rbind(climate_lamberton,climate_waseca) #merging both weather data sets together
+str(weatherboth)
+str(moisture)
+# Add precipitation lags to the moisture data
+moisture_with_precip <- moisture %>%
+  left_join(weatherboth, by = c("date", "location")) %>% # Join weather data
+  arrange(plot, date) %>% # Ensure data is sorted by plot and date
+  group_by(plot) %>% # Group by plot for lagging
+  mutate(
+    # Lagged precipitation for each location
+    precip_1_day = lag(precipitation, 1),
+    precip_2_day = lag(precipitation, 2),
+    precip_4_day = lag(precipitation, 4),
+    precip_6_day = lag(precipitation, 6)
+  ) %>%
+  ungroup()
+str(moisture_with_precip)
+#it worked! lets make some plots from this----
+# Scatter plot of soil moisture vs. lagged precipitation (1 day)
+ggplot(moisture_with_precip, aes(x = precip_1_day, y = measurement, color = location)) +
+  geom_point(alpha = 0.6) +
+  labs(
+    title = "Soil Moisture vs. Precipitation",
+    x = "Precipitation, and days before measurement [inches]",
+    y = "Soil Moisture",
+    color = "Location"
+  ) +
+  theme_minimal()
+# second trial for this
+# Convert data to long format for easier plotting
+# Rename the existing 'precipitation' column to avoid conflict
+moisture_with_precip <- dplyr::rename(moisture_with_precip, original_precipitation = precipitation)
+
+# Convert data to long format for easier plotting
+moisture_long <- moisture_with_precip %>%
+  pivot_longer(
+    cols = starts_with("precip_"),
+    names_to = "precip_lag",
+    values_to = "precipitation"
+  )
+# Create the scatter plot
+ggplot(moisture_long, aes(x = precipitation, y = measurement)) +
+  geom_point(alpha = 0.5, size = 2) +
+  facet_wrap(~ precip_lag, scales = "free_x") +
+  labs(
+    title = "Soil Moisture vs Precipitation with Different Lags",
+    x = "Precipitation (inches)",
+    y = "Soil Moisture (%)"
+  ) +
+  theme_minimal() +
+  theme(
+    strip.text = element_text(size = 10),
+    axis.title = element_text(size = 12),
+    plot.title = element_text(size = 14, face = "bold")
+  )
+# i dont love this visualization, probably wont include this
+#boxplot of soil moisture by location
+ggplot(moisture_with_precip, aes(x = as.factor(year), y = measurement, fill = location)) +
+  geom_boxplot() +
+  labs(
+    title = "Soil Moisture by Location and Year",
+    x = "Year",
+    y = "Soil Moisture",
+    fill = "Location"
+  ) +
+  theme_minimal()
+#time series of soil moisture and precipitation
+# Filter data for a specific plot
+plot_data <- moisture_with_precip %>% filter(plot == 1105)
+ggplot(plot_data, aes(x = date)) +
+  geom_line(aes(y = measurement, color = "Soil Moisture"), size = 1) +
+  geom_line(aes(y = precip_1_day, color = "Precipitation (1 Day Lag)"), linetype = "dashed", size = 1) +
+  labs(
+    title = "Soil Moisture and Precipitation Over Time (Plot 1105)",
+    x = "Date",
+    y = "Value",
+    color = "Variable"
+  ) +
+  theme_minimal() +
+  scale_color_manual(values = c("Soil Moisture" = "blue", "Precipitation (1 Day Lag)" = "red"))
+
+#Plot soil moisture by depth, location, year and difference through time.----
+str(moisture)
+str(moisture_with_precip)
+# Step 1: Plot soil moisture by depth and location
+ggplot(moisture_with_precip, aes(x = factor(depth), y = measurement, fill = location)) +
+  geom_boxplot(outlier.alpha = 0.5) +
+  facet_wrap(~year) +
+  labs(
+    title = "Soil Moisture by Depth and Location",
+    x = "Depth (cm)",
+    y = "Soil Moisture",
+    fill = "Location"
+  ) +
+  theme_minimal()
+ # Step 2: Time series of soil moisture by location and depth
+ggplot(moisture_with_precip, aes(x = date, y = measurement, color = as.factor(depth))) +
+  geom_smooth(method = "loess", se = FALSE, alpha = 0.7) +
+  facet_wrap(~location) +
+  labs(
+    title = "Smoothed Trends of Soil Moisture Over Time by Depth and Location",
+    x = "Date",
+    y = "Soil Moisture",
+    color = "Depth (cm)"
+  ) +
+  theme_minimal()
+# Step 3: Comparison across years
+ggplot(moisture_with_precip, aes(x = date, y = measurement, color = as.factor(depth))) +
+  geom_line() +
+  facet_grid(year ~ location) +
+  labs(
+    title = "Comparison of Soil Moisture Across Years",
+    x = "Date",
+    y = "Soil Moisture",
+    color = "Depth (cm)"
+  ) +
+  theme_minimal()
+#different box plot
+ggplot(moisture_with_precip, aes(x = date, y = measurement, color = location)) +
+  geom_line(alpha = 0.7) +
+  facet_grid(depth ~ location)
+  labs(
+    title = "Soil Moisture Over Time by Depth and Location",
+    x = "Date",
+    y = "Soil Moisture",
+    color = "Location"
+  ) +
+  theme_minimal()
+#lets make another anova for this data set
+str(soils_2014)
+str(soils_2015)
+str(moisture)
+moisture$depth <- as.factor(moisture$depth)
+moisture <- moisture %>%
+  mutate(depth = case_when(
+    depth == 50 ~ "0-6\"",
+    depth == 100 ~ "6-18\"",
+    # Add other mappings if needed
+    TRUE ~ as.character(depth)  # Fallback to avoid NA
+  ))
+# Calculate mean measurement for each plot, depth, and year
+mean_measurement <- moisture %>%
+  group_by(plot, depth, year) %>%
+  dplyr:: summarise(mean_measurement = mean(measurement, na.rm = TRUE),
+                    count = n(),
+                    .groups = "drop")
+
+# View the resulting summary
+head(mean_measurement)
+#lets merge moisture and soils 2015 to make an anova to see if moisture impacts TOC significantly
+soils_2015_moisture <- soils_2015 %>%
+  left_join(mean_measurement, by = c("plot", "depth", "year"))
+str(soils_2015_moisture)
+glimpse(soils_2015_moisture)
+#anova time!
+# Ensure TOC and measurement columns are numeric
+soils_2015_moisture <- soils_2015_moisture %>%
+  mutate(
+    TOC = as.numeric(TOC),
+    measurement = as.numeric(mean_measurement)
+  )
+# Remove rows with missing values
+anova_data <- soils_2015_moisture %>%
+  filter(!is.na(TOC), !is.na(mean_measurement))
+# Perform ANOVA
+anova_result <- aov(TOC ~ measurement, data = anova_data)
+# Display the summary
+summary(anova_result)
+ggplot(anova_data, aes(x = measurement, y = TOC, color = depth)) + 
+  geom_point() + 
+  geom_smooth(method = "lm", se = TRUE) + 
+  labs(
+    title = "Soil Moisture Over Time by Depth and Location", 
+    x = "Moisture", 
+    y = "TOC", 
+    color = "Depth (cm)"
+  )
+
+#lets merge moisture and soils 2014 to make an anova to see if moisture impacts LOI OM significantly
+str(soils_2014)
+str(moisture)
+soils_2014$plot <- soils_2014$Plot
+soils_2014_moisture <- soils_2014 %>%
+  left_join(mean_measurement, by = c("plot", "depth", "year"))
+str(soils_2014_moisture)
+# Perform ANOVA 
+anova_result <- aov(`LOI OM` ~ Soil_moisture_gravimetric, data = soils_2014_moisture_clean)
+# Display the summary of the ANOVA results
+summary(anova_result)
+# Scatter plot with regression line
+ggplot(soils_2014_moisture_clean, aes(x = Soil_moisture_gravimetric, y = `LOI OM`)) +
+  geom_point(color = "blue", alpha = 0.7) +
+  geom_smooth(method = "lm", color = "red", se = TRUE) +
+  labs(
+    title = "Relationship Between Soil Moisture and LOI OM",
+    x = "Soil Moisture Gravimetric (%)",
+    y = "Loss on Ignition Organic Matter (%)"
+  ) +
+  theme_minimal()
+# yield added?
+str(yield)
+str(soils_2014_moisture)
+soils_2014_moisturemean$year <- as.factor(soils_2014_moisturemean$year)
+# Merge the datasets by plot and year
+merged_yield_soil_moisture <- left_join(soils_2014_moisturemean, yield, by = c("plot", "year"))
+# View the structure of the merged dataset
+str(merged_yield_soil_moisture )
+# Filter out rows with NA values in key variables
+manova_data <- merged_yield_soil_moisture %>%
+  filter(!is.na(mean_measurement), !is.na(`LOI OM`), !is.na(grain_yield))
+# Perform MANOVA
+manova_result <- manova(cbind(`LOI OM`, grain_yield) ~ mean_measurement, data = manova_data)
+# Summarize MANOVA results
+summary(manova_result)
+# ANOVA for LOI OM
+anova_loi <- aov(`LOI OM` ~ grain_yield, data = manova_data)
+summary(anova_loi)
+anova_OM <- aov(grain_yield ~ `LOI OM`, data = manova_data)
+summary(anova_OM)
+# ANOVA for Grain Yield
+anova_grain <- aov(grain_yield ~ mean_measurement, data = manova_data)
+summary(anova_grain)
+# Grain Yield vs. Mean Soil Moisture
+ggplot(manova_data, aes(x = mean_measurement, y = grain_yield)) +
+  geom_point() +
+  geom_smooth(method = "lm", color = "red", se = TRUE) +
+  labs(title = "Grain Yield vs. Mean Soil Moisture", x = "Mean Soil Moisture", y = "Grain Yield")
+
+# LOI OM vs. Grain Yield
+ggplot(manova_data, aes(x = grain_yield, y = `LOI OM`)) +
+  geom_point() +
+  geom_smooth(method = "lm", color = "blue", se = TRUE) +
+  labs(title = "LOI OM vs. Grain Yield", x = "Grain Yield", y = "LOI OM")
+
+
+
+# Grain Yield vs. Mean Soil Moisture
+ggplot(manova_data, aes(x = grain_yield, y = mean_measurement)) +
+  geom_point() +
+  geom_smooth(method = "lm", color = "red", se = TRUE) +
+  labs(title = "Mean Soil Moisture vs Grain Yield", x = "Grain Yield", y = "Mean Soil Moisture")
+
+# LOI OM vs. Grain Yield
+ggplot(manova_data, aes(x = `LOI OM`, y = grain_yield)) +
+  geom_point() +
+  geom_smooth(method = "lm", color = "blue", se = TRUE) +
+  labs(title = "Grain Yield vs LOI OM", x = "LOI OM", y = "Grain Yield")
