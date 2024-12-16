@@ -354,3 +354,337 @@ climate_waseca2015$c_gdd[1]<-climate_waseca2015$truegdd[1] #fill the first row o
 for(i in 2:length(climate_waseca2015$c_gdd)){
   climate_waseca2015$c_gdd[i]<-climate_waseca2015$truegdd[i]+climate_waseca2015$c_gdd[i-1]
 }
+lysimeter_2015 <- read_excel(wrangle, sheet = "Lysimeter-2015")
+lysimeter_2014 <- read_excel(wrangle, sheet = "Lysimeter-2014")
+#issue with nrate in lysimeter 2014
+# Update the Nrate to 80 for the row where Nrate equals "N60"
+lysimeter_2014$Nrate[lysimeter_2014$Nrate == "N60"] <- 80
+
+#merge climate datasets climate and lysimeter 2014----
+str(lysimeter_2014)
+str(mean_temp_by_month_lamberton)
+str(mean_temp_by_month_waseca)
+names(lysimeter_2014)[which(names(lysimeter_2014)=="Location")]<-"location"
+# Split the `date` column into year and month
+lysimeter_2014_climate <- lysimeter_2014 %>%
+  mutate(
+    # Parse the date column as a proper date
+    parsed_date = parse_date_time(date, orders = c("Y b", "Y B")), # Matches "2014 May" or "2014 September"
+    year = year(parsed_date),          # Extract the year
+    month = month(parsed_date)         # Extract the month (numeric)
+  )
+#add location to mean temp by month lamberton and waseca
+mean_temp_by_month_lamberton <- mean_temp_by_month_lamberton %>%
+  mutate(location = "Lam")
+mean_temp_by_month_waseca <- mean_temp_by_month_waseca %>%
+  mutate(location = "Was")
+#merge the temp with lysimeter 2014
+lysimeter_2014_climate <- lysimeter_2014
+str(lysimeter_2014_climate)
+str(mean_temp_by_month_lamberton) #monthly average of lamberton 2014
+mclam14<-as.data.frame(mean_temp_by_month_lamberton) #force this into a dataframe
+str(mclam14)
+mclam14 <- mclam14 %>%
+  mutate(
+    year = as.numeric(year),    # Ensure year is numeric
+    month = as.numeric(month)   # Ensure month is numeric
+  )
+str(mclam14)
+str(mean_temp_by_month_waseca) #monthly averages of waseca 2014
+mcwas14<-as.data.frame(mean_temp_by_month_waseca)
+str(mcwas14)
+mcwas14 <- mcwas14 %>%
+  mutate(
+    year = as.numeric(year),    # Ensure year is numeric
+    month = as.numeric(month)   # Ensure month is numeric
+  )
+str(mcwas14)
+mcall14<-rbind(mcwas14,mclam14) #merging both weather data sets together
+str(mcall14)
+str(lysimeter_2014_climate)
+# i need to numerically change the mcall14 data to be 1 as 2014, 2 as 2015, and 3 as 2016 to match the structure of lysimeter 2014 climate
+mcall14 <- mcall14 %>% # Update the 'year' column to match the actual calendar year
+  mutate(year = case_when(
+    year == 1 ~ 2014,
+    year == 2 ~ 2015,
+    year == 3 ~ 2016,
+    TRUE ~ year # Keeps other values unchanged, if present
+  ))
+lysimeter_2014_climate <- lysimeter_2014 %>%
+  left_join(mcall14, by = c("year", "month", "location")) #merging the weather with the lysimeter data
+
+#merge climate datasets climate and lysimeter 2015----
+str(lysimeter_2015)
+str(climate_lamberton2015)
+str(climate_waseca2015)
+# turn date in lysimeter 2015 into actual date
+#%m/%d/%Y
+lysimeter_2015$date<-as.Date(lysimeter_2015$date, format = "%m/%d/%Y")
+str(lysimeter_2015)
+# turn date in climate waseca 2015 into actual date
+#%m/%d/%Y
+climate_waseca2015$date<-as.Date(climate_waseca2015$date, format = "%m/%d/%Y")
+str(climate_waseca2015)
+#merge the temp with lysimeter 2014
+lysimeter_2015_climate <- lysimeter_2015
+str(lysimeter_2015_climate)
+str(climate_lamberton2015) 
+str(climate_waseca2015)
+#merging both weather data sets together 2015
+# Standardize column names to ensure they match exactly
+colnames(climate_waseca2015)[colnames(climate_waseca2015) == "MinT"] <- "minT"
+# Bind the datasets together
+mcall15 <- rbind(climate_lamberton2015, climate_waseca2015)
+str(mcall15)
+lysimeter_2015_climate <- lysimeter_2015_climate %>%
+  left_join(mcall15, by = c("date", "location")) #merging the weather with the lysimeter data
+#lysimeter and climate plots----
+#2014
+# Plot nitrate vs. precipitation grouped by Nrate
+str(lysimeter_2014_climate)
+xyplot(mean_precip ~ nitrate, data = lysimeter_2014_climate,
+       groups = factor(Nrate),  # Group by Nrate
+       type = c("p", "r"),      # Points and regression lines
+       auto.key = list(columns = 3),  # Add a legend
+       xlab = "Nitrate (mg/L)",       # x-axis label
+       ylab = "Precipitation (in)",   # y-axis label
+       main = "Nitrate vs Precipitation by Nrate 2014"
+)
+# Boxplot of nitrate by Nrate
+bwplot(nitrate ~ factor(Nrate)| location, data = lysimeter_2014_climate,
+       xlab = "Nrate (lbs/acre)",      # Label for x-axis
+       ylab = "Nitrate (mg/L)",        # Label for y-axis
+       main = "Nitrate Distribution by Nrate 2014"
+)
+#plot nitrate vs maxt temp by nrate 
+xyplot(nitrate ~ mean_maxT, data = lysimeter_2014_climate,
+       groups = factor(Nrate),   # Group by Nrate
+       type = c("p", "r"),        # Points and regression lines
+       auto.key = TRUE,           # Add a legend
+       xlab = "Max Temperature (°C)", 
+       ylab = "Nitrate (mg/L)",
+       main = "Nitrate vs Max Temperature by Nrate 2014")
+#2015
+#nitrate numbers are whack in 2015 lets fix that 
+# Clean and convert nitrate to numeric
+lysimeter_2015_climate <- lysimeter_2015_climate %>%
+  mutate(
+    nitrate = as.numeric(gsub("[^0-9.]", "", nitrate))  # Remove non-numeric characters
+  )
+# Set small values to 0 and round to 2 decimal places
+lysimeter_2015_climate <- lysimeter_2015_climate %>%
+  mutate(
+    nitrate = ifelse(nitrate < 0.01, 0, round(nitrate, 2))
+  )
+head(lysimeter_2015_climate$nitrate)
+
+# Plot nitrate vs. precipitation grouped by Nrate
+xyplot(precipitation ~ nitrate, data = lysimeter_2015_climate,
+       groups = factor(Nrate),  # Group by Nrate
+       type = c("p", "r"),      # Points and regression lines
+       auto.key = list(columns = 3),  # Add a legend
+       xlab = "Nitrate (mg/L)",       # x-axis label
+       ylab = "Precipitation (in)",   # y-axis label
+       main = "Nitrate vs Precipitation by Nrate 2015"
+)
+
+#plot nitrate vs maxt temp by nrate 
+xyplot(nitrate ~ maxT, data = lysimeter_2015_climate,
+       groups = factor(Nrate),   # Group by Nrate
+       type = c("p", "r"),        # Points and regression lines
+       auto.key = TRUE,           # Add a legend
+       xlab = "Max Temperature (°C)", 
+       ylab = "Nitrate (mg/L)",
+       main = "Nitrate vs Max Temperature by Nrate 2015")
+# Boxplot to visualize the distribution across months
+bwplot(nitrate ~ factor(Nrate)| location, data = lysimeter_2015_climate,
+       xlab = "Nrate (lbs/acre)",      # Label for x-axis
+       ylab = "Nitrate (mg/L)",        # Label for y-axis
+       main = "Nitrate Distribution by Nrate 2015"
+)
+
+lysimeter_2015_climate$Nrate_factor <- as.factor(lysimeter_2015_climate$Nrate)
+lysimeter_2015_climate <- na.omit(lysimeter_2015_climate)
+lysimeter_2015_climate$Nrate_factor <- as.factor(lysimeter_2015_climate$Nrate)
+# Create the ggpairs plot, explicitly converting the relevant columns to numeric
+lysimeter_2015_climate$Nrate_factor <- as.factor(lysimeter_2015_climate$Nrate)
+
+ggpairs(lysimeter_2015_climate[, c("nitrate", "maxT", "minT", "precipitation", "Nrate")],
+        aes(colour = lysimeter_2015_climate$Nrate_factor)) +  # Explicitly reference Nrate_factor
+  theme_minimal()  # Optional: adds a clean theme to the plot
+#Summarize soil moisture and lysimeter data by various time intervals (month, season, year)----
+# Add 'season' function
+get_season <- function(month) {
+  case_when(
+    month %in% c(12, 1, 2) ~ "Winter",
+    month %in% c(3, 4, 5) ~ "Spring",
+    month %in% c(6, 7, 8) ~ "Summer",
+    month %in% c(9, 10, 11) ~ "Fall"
+  )
+}
+
+# Prepare moisture dataset
+moisture <- moisture %>%
+  mutate(
+    date = as.Date(date),
+    year = year(date),
+    month = month(date),
+    season = get_season(month)
+  )
+
+# Prepare lysimeter_2015 dataset
+lysimeter_2015 <- lysimeter_2015 %>%
+  mutate(
+    date = as.Date(date),
+    year = year(date),
+    month = month(date),
+    season = get_season(month)
+  )
+
+# Prepare lysimeter_2014 dataset
+lysimeter_2014 <- lysimeter_2014 %>%
+  mutate(
+    date = as.Date(parsed_date),
+    season = get_season(month)
+  )
+# Summarize by month
+moisture_summary_month <- moisture %>%
+  group_by(year, month) %>%
+  dplyr::summarise(
+    mean_measurement = mean(measurement, na.rm = TRUE),
+    sd_measurement = sd(measurement, na.rm = TRUE),
+    count = n(),  # Add count of observations for context
+    .groups = "drop"
+  )
+print(moisture_summary_month)
+# Summarize by season
+moisture_summary_season <- moisture %>%
+  group_by(year, season) %>%
+  dplyr::summarise(
+    mean_measurement = mean(measurement, na.rm = TRUE),
+    sd_measurement = sd(measurement, na.rm = TRUE),
+    count = n(),  # Add count of observations for context
+    .groups = "drop"
+  )
+print(moisture_summary_season)
+# Summarize by year
+moisture_summary_year <- moisture %>%
+  group_by(location, year) %>%
+  dplyr::summarize(
+    mean_measurement = mean(measurement, na.rm = TRUE),
+    sd_measurement = sd(measurement, na.rm = TRUE),
+    count = n(),
+    .groups = "drop"
+  )
+print(moisture_summary_year)
+# Convert Nrate in both datasets to numeric
+lysimeter_2014 <- lysimeter_2014 %>%
+  mutate(Nrate = as.numeric(Nrate))
+
+lysimeter_2015 <- lysimeter_2015 %>%
+  mutate(Nrate = as.numeric(Nrate))
+# Convert Nrate in both datasets to numeric
+lysimeter_2014 <- lysimeter_2014 %>%
+  mutate(nitrate = as.numeric(nitrate))
+
+lysimeter_2015 <- lysimeter_2015 %>%
+  mutate(nitrate = as.numeric(nitrate))
+
+# Combine lysimeter data for consistency
+lysimeter_combined <- bind_rows(lysimeter_2014, lysimeter_2015)
+
+# Summarize by month
+lysimeter_summary_month <- lysimeter_combined %>%
+  group_by(location, year, month) %>%
+  dplyr::summarize(
+    mean_nitrate = mean(nitrate, na.rm = TRUE),
+    sd_nitrate = sd(nitrate, na.rm = TRUE),
+    count = n(),
+    .groups = "drop"
+  )
+print(lysimeter_summary_month)
+# Summarize by season
+lysimeter_summary_season <- lysimeter_combined %>%
+  group_by(location, year, season) %>%
+  dplyr::summarize(
+    mean_nitrate = mean(nitrate, na.rm = TRUE),
+    sd_nitrate = sd(nitrate, na.rm = TRUE),
+    count = n(),
+    .groups = "drop"
+  )
+print(lysimeter_summary_season)
+# Summarize by year
+lysimeter_summary_year <- lysimeter_combined %>%
+  group_by(location, year) %>%
+  dplyr::summarize(
+    mean_nitrate = mean(nitrate, na.rm = TRUE),
+    sd_nitrate = sd(nitrate, na.rm = TRUE),
+    count = n(),
+    .groups = "drop"
+  )
+print(lysimeter_summary_year)
+#lets do a regression and scatter plot featuring nitrate and precipitation----
+# Scatter plot with regression lines
+ggplot(lysimeter_2014_climate, aes(x = mean_precip, y = nitrate, color = Nrate)) +
+  geom_point(size = 3, alpha = 0.6) +        # Scatter points
+  geom_smooth(method = "lm", se = FALSE) +  # Regression lines
+  labs(
+    title = "Nitrate vs. Mean Precipitation by Nrate (2014)",
+    x = "Mean Precipitation (inches)",
+    y = "Nitrate (mg/L)",
+    color = "Nrate (lbs/acre)"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "top")
+# Fit a regression model
+nitrate_model <- lm(nitrate ~ mean_precip * Nrate, data = lysimeter_2014_climate)
+# Display model summary
+summary(nitrate_model)
+#maybe temperature is a more indicative factor?
+ggplot(lysimeter_2014_climate, aes(x = mean_maxT, y = nitrate, color = Nrate)) +
+  geom_point(size = 3, alpha = 0.6) +        # Scatter points
+  geom_smooth(method = "lm", se = FALSE) +  # Regression lines
+  labs(
+    title = "Nitrate vs. Max Temp by Nrate (2014)",
+    x = "Max Temp Precipitation (F)",
+    y = "Nitrate (mg/L)",
+    color = "Nrate (lbs/acre)"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "top")
+# Fit a regression model
+nitrate_model <- lm(nitrate ~ mean_maxT * Nrate, data = lysimeter_2014_climate)
+# Display model summary
+summary(nitrate_model)
+#2015 now!
+ggplot(lysimeter_2015_climate, aes(x = precipitation, y = nitrate, color = as.factor(Nrate))) +
+  geom_point(size = 3, alpha = 0.6) +        # Scatter points
+  geom_smooth(method = "lm", se = FALSE) +  # Regression lines
+  labs(
+    title = "Nitrate vs. Precipitation by Nrate (2015)",
+    x = "Precipitation (inches)",
+    y = "Nitrate (mg/L)",
+    color = "Nrate (lbs/acre)"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "top")
+# Fit a regression model
+nitrate_model_2015_precip <- lm(nitrate ~ precipitation * Nrate, data = lysimeter_2015_climate)
+# Display model summary
+summary(nitrate_model_2015_precip)
+ggplot(lysimeter_2015_climate, aes(x = maxT, y = nitrate, color = as.factor(Nrate))) +
+  geom_point(size = 3, alpha = 0.6) +        # Scatter points
+  geom_smooth(method = "lm", se = FALSE) +  # Regression lines
+  labs(
+    title = "Nitrate vs. Max Temperature by Nrate (2015)",
+    x = "Max Temperature (F)",
+    y = "Nitrate (mg/L)",
+    color = "Nrate (lbs/acre)"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "top")
+
+# Fit a regression model
+nitrate_model_2015_temp <- lm(nitrate ~ maxT * Nrate, data = lysimeter_2015_climate)
+# Display model summary
+summary(nitrate_model_2015_temp)
